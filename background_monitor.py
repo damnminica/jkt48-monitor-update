@@ -1,14 +1,22 @@
 """
 JKT48 Background Stock Monitor
 Runs 24/7 on Railway server - monitors stock changes and logs to file
+Optimized: WIB timezone only, Telegram only, +1 day event date offset
 """
 
 import requests
 import json
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import os
 from pathlib import Path
+import pytz
+import locale
+
+# Constants
+WIB = pytz.timezone('Asia/Jakarta')
+TELEGRAM_BOT_TOKEN = "8541605155:AAFlFyF1g2DkW-ZonmX2H_7S-k67n3JKjWE"
+TELEGRAM_CHAT_ID = "824000905"
 
 # Configuration
 API_ENDPOINTS = {
@@ -22,6 +30,34 @@ CHANGE_LOG_FILE = "/mnt/user-data/outputs/change_log.json"
 PREVIOUS_DATA_FILE = "/mnt/user-data/outputs/previous_data.json"
 CONFIG_FILE = "/mnt/user-data/outputs/monitor_config.json"
 COOKIE_FILE = "/mnt/user-data/outputs/cf_cookie.json"
+
+# Helper functions
+def now_wib():
+    """Get current time in WIB"""
+    return datetime.now(WIB)
+
+def format_event_date(api_date_str):
+    """Convert API date to display format with +1 day offset"""
+    try:
+        date_obj = datetime.strptime(api_date_str, '%Y-%m-%d') + timedelta(days=1)
+        try:
+            locale.setlocale(locale.LC_TIME, 'id_ID.UTF-8')
+        except:
+            try:
+                locale.setlocale(locale.LC_TIME, 'id_ID')
+            except:
+                pass
+        return date_obj.strftime("%A, %d %B %Y")
+    except:
+        return api_date_str
+
+def get_adjusted_event_date(api_date_str):
+    """Get event date with +1 day offset"""
+    try:
+        date_obj = datetime.strptime(api_date_str, '%Y-%m-%d') + timedelta(days=1)
+        return date_obj.strftime('%Y-%m-%d')
+    except:
+        return api_date_str
 
 # Load config (Telegram/WhatsApp settings + Cloudflare cookie)
 def load_config():
@@ -123,45 +159,22 @@ def save_change_log(changes):
     except Exception as e:
         print(f"Error saving change log: {e}")
 
-def send_telegram_notification(config, message):
-    """Send notification via Telegram"""
-    if not config["telegram"]["enabled"]:
-        return False
-    
-    token = config["telegram"]["token"]
-    chat_id = config["telegram"]["chat_id"]
-    
-    if not token or not chat_id:
-        return False
-    
+def send_telegram_notification(message):
+    """Send notification via Telegram with hardcoded credentials and WIB timezone"""
     try:
-        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        wib_time = now_wib().strftime('%d/%m/%Y %H:%M:%S WIB')
         payload = {
-            "chat_id": chat_id,
-            "text": f"🎵 *JKT48 Stock Alert*\n\n{message}\n\n⏰ {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}",
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": f"🎵 *JKT48 Stock Alert*\n\n{message}\n\n⏰ {wib_time}",
             "parse_mode": "Markdown"
         }
-        response = requests.post(url, json=payload, timeout=5)
+        response = requests.post(url, json=payload, timeout=10)
         return response.json().get('ok', False)
     except Exception as e:
         print(f"Telegram error: {e}")
         return False
 
-def send_whatsapp_notification(config, message):
-    """Send notification via WhatsApp"""
-    if not config["whatsapp"]["enabled"]:
-        return False
-    
-    phone = config["whatsapp"]["phone"]
-    apikey = config["whatsapp"]["apikey"]
-    
-    if not phone or not apikey:
-        return False
-    
-    try:
-        import urllib.parse
-        text = urllib.parse.quote(f"JKT48 Alert: {message}")
-        url = f"https://api.callmebot.com/whatsapp.php?phone={phone}&text={text}&apikey={apikey}"
         response = requests.get(url, timeout=5)
         return response.status_code == 200
     except Exception as e:
@@ -280,8 +293,8 @@ def detect_changes(new_data, prev_data, event_name, config):
                 else:
                     msg = f"♻️ *STOCK KEMBALI!*\n[{event_name}]\n{change['member']} ({change['session']})\nSold Out → {new_available} tiket"
                 
-                send_telegram_notification(config, msg)
-                send_whatsapp_notification(config, msg)
+                send_telegram_notification(msg)
+                # send_whatsapp_notification(config, msg)
             
             # 2. Stock increase (not from sold out)
             elif new_available > prev_available and prev_available > 0:
@@ -298,8 +311,8 @@ def detect_changes(new_data, prev_data, event_name, config):
                 changes.append(change)
                 
                 msg = f"📈 *STOCK NAIK!*\n[{event_name}]\n{change['member']} ({change['session']})\n{change['old_quota']} → {change['new_quota']} (+{change['difference']})"
-                send_telegram_notification(config, msg)
-                send_whatsapp_notification(config, msg)
+                send_telegram_notification(msg)
+                # send_whatsapp_notification(config, msg)
             
             # 3. New transaction
             elif new_sold > prev_sold:
@@ -320,8 +333,8 @@ def detect_changes(new_data, prev_data, event_name, config):
                 # Only notify for significant purchases
                 if sold_diff >= 5 or new_available == 0:
                     msg = f"🎫 *TRANSAKSI BARU!*\n[{event_name}]\n{change['member']} ({change['session']})\n{sold_diff} tiket terjual\nSisa: {new_available}"
-                    send_telegram_notification(config, msg)
-                    send_whatsapp_notification(config, msg)
+                    send_telegram_notification(msg)
+                    # send_whatsapp_notification(config, msg)
             
             # 4. Refund (tickets_sold decreased)
             elif new_sold < prev_sold and prev_available > 0:
@@ -340,8 +353,8 @@ def detect_changes(new_data, prev_data, event_name, config):
                 changes.append(change)
                 
                 msg = f"💳 *REFUND/CANCEL!*\n[{event_name}]\n{change['member']} ({change['session']})\n{refund_diff} dibatalkan\nStock: {new_available}"
-                send_telegram_notification(config, msg)
-                send_whatsapp_notification(config, msg)
+                send_telegram_notification(msg)
+                # send_whatsapp_notification(config, msg)
             
             # 5. Sold out
             if new_available == 0 and prev_available > 0:
@@ -356,8 +369,8 @@ def detect_changes(new_data, prev_data, event_name, config):
                 changes.append(change)
                 
                 msg = f"🔴 *SOLD OUT!*\n[{event_name}]\n{change['member']} ({change['session']})\nHabis dari {change['last_available']} tiket!"
-                send_telegram_notification(config, msg)
-                send_whatsapp_notification(config, msg)
+                send_telegram_notification(msg)
+                # send_whatsapp_notification(config, msg)
     
     return changes
 

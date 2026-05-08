@@ -1,41 +1,79 @@
 """
 JKT48 Stock Monitor - Streamlit App
-Auto-monitor stock changes with Telegram/WhatsApp notifications
+Auto-monitor stock changes with Telegram notifications
+Optimized: WIB timezone only, +1 day event date offset
 """
 
 import streamlit as st
 import requests
 import pandas as pd
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import plotly.express as px
 import plotly.graph_objects as go
 from streamlit_autorefresh import st_autorefresh
 import pytz
+import locale
 
-# Timezone utilities
-def get_user_timezone():
-    """Get user's timezone from session state or default to WIB"""
-    if 'user_timezone' not in st.session_state:
-        st.session_state.user_timezone = 'Asia/Jakarta'  # Default WIB
-    return st.session_state.user_timezone
+# Constants
+WIB = pytz.timezone('Asia/Jakarta')
+TELEGRAM_BOT_TOKEN = "8541605155:AAFlFyF1g2DkW-ZonmX2H_7S-k67n3JKjWE"
+TELEGRAM_CHAT_ID = "824000905"
 
-def format_timestamp(timestamp_str, timezone_name):
-    """Convert timestamp to user's timezone"""
+# Date formatting functions
+def format_event_date(api_date_str):
+    """Convert API date (YYYY-MM-DD) to display format with +1 day offset
+    Returns: 'Jumat, 09 Mei 2026' format
+    """
     try:
-        # Parse ISO format timestamp
-        if 'T' in timestamp_str:
-            dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-        else:
-            dt = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S.%f")
+        # Parse API date and add 1 day
+        date_obj = datetime.strptime(api_date_str, '%Y-%m-%d') + timedelta(days=1)
         
-        # Convert to user timezone
-        user_tz = pytz.timezone(timezone_name)
-        dt_utc = dt.replace(tzinfo=pytz.UTC) if dt.tzinfo is None else dt
-        dt_local = dt_utc.astimezone(user_tz)
+        # Try to set Indonesian locale
+        try:
+            locale.setlocale(locale.LC_TIME, 'id_ID.UTF-8')
+        except:
+            try:
+                locale.setlocale(locale.LC_TIME, 'id_ID')
+            except:
+                pass  # Fallback to English if Indonesian locale not available
         
-        return dt_local.strftime("%d/%m/%Y %H:%M:%S")
+        # Format: "Jumat, 09 Mei 2026"
+        return date_obj.strftime("%A, %d %B %Y")
+    except:
+        return api_date_str
+
+def get_adjusted_event_date(api_date_str):
+    """Get event date with +1 day offset in YYYY-MM-DD format for filtering"""
+    try:
+        date_obj = datetime.strptime(api_date_str, '%Y-%m-%d') + timedelta(days=1)
+        return date_obj.strftime('%Y-%m-%d')
+    except:
+        return api_date_str
+
+def now_wib():
+    """Get current time in WIB"""
+    return datetime.now(WIB)
+
+def format_timestamp_wib(timestamp_str):
+    """Convert any timestamp to WIB format"""
+    try:
+        if isinstance(timestamp_str, str):
+            if 'T' in timestamp_str:
+                dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+            else:
+                try:
+                    dt = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S.%f")
+                except:
+                    dt = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+            
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=pytz.UTC)
+            
+            wib_dt = dt.astimezone(WIB)
+            return wib_dt.strftime("%d/%m/%Y %H:%M:%S")
+        return str(timestamp_str)
     except:
         return str(timestamp_str)
 
@@ -209,36 +247,18 @@ def fetch_api_data():
         return None
 
 def send_telegram_notification(message):
-    """Send notification via Telegram"""
-    if not st.session_state.telegram_token or not st.session_state.telegram_chat_id:
-        return False
-    
+    """Send notification via Telegram with hardcoded credentials"""
     try:
-        url = f"https://api.telegram.org/bot{st.session_state.telegram_token}/sendMessage"
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         payload = {
-            "chat_id": st.session_state.telegram_chat_id,
-            "text": f"🎵 *JKT48 Stock Alert*\n\n{message}\n\n⏰ {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}",
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": message,
             "parse_mode": "Markdown"
         }
-        response = requests.post(url, json=payload, timeout=5)
+        response = requests.post(url, json=payload, timeout=10)
         return response.json().get('ok', False)
     except Exception as e:
         st.error(f"Telegram error: {str(e)}")
-        return False
-
-def send_whatsapp_notification(message):
-    """Send notification via WhatsApp (CallMeBot)"""
-    if not st.session_state.whatsapp_phone or not st.session_state.whatsapp_apikey:
-        return False
-    
-    try:
-        import urllib.parse
-        text = urllib.parse.quote(f"JKT48 Alert: {message}")
-        url = f"https://api.callmebot.com/whatsapp.php?phone={st.session_state.whatsapp_phone}&text={text}&apikey={st.session_state.whatsapp_apikey}"
-        response = requests.get(url, timeout=5)
-        return response.status_code == 200
-    except Exception as e:
-        st.error(f"WhatsApp error: {str(e)}")
         return False
 
 def detect_changes(new_data):
@@ -392,9 +412,14 @@ def detect_changes(new_data):
     return changes
 
 def create_dataframe(data):
-    """Convert API data to DataFrame"""
+    """Convert API data to DataFrame with +1 day event date offset"""
     rows = []
     for session in data.get('session', []):
+        # Get original date and apply +1 day offset
+        original_date = session['date']
+        adjusted_date = get_adjusted_event_date(original_date)
+        formatted_date = format_event_date(original_date)
+        
         for detail in session['session_detail']:
             team = MEMBER_TEAM_MAP.get(detail['jkt48_member_name'], 'Unknown')
             total_quota = detail['tickets_sold'] + detail['available_quota']
@@ -402,7 +427,8 @@ def create_dataframe(data):
             
             rows.append({
                 'Session': session['label'],
-                'Date': session['date'],
+                'Date': adjusted_date,  # YYYY-MM-DD format for filtering
+                'Date_Display': formatted_date,  # "Jumat, 09 Mei 2026" for display
                 'Time': f"{session['start_time']} - {session['end_time']}",
                 'Lane': detail['label'],
                 'Member': detail['jkt48_member_name'],
@@ -421,30 +447,11 @@ def create_dataframe(data):
 with st.sidebar:
     st.header("⚙️ Settings")
     
-    # Timezone Selector
-    st.subheader("🌍 Timezone")
-    
-    # Common timezones
-    timezones = {
-        "WIB (Jakarta)": "Asia/Jakarta",
-        "WITA (Makassar)": "Asia/Makassar", 
-        "WIT (Jayapura)": "Asia/Jayapura",
-        "Singapore": "Asia/Singapore",
-        "Tokyo": "Asia/Tokyo",
-        "UTC": "UTC",
-        "New York": "America/New_York",
-        "London": "Europe/London"
-    }
-    
-    selected_tz_display = st.selectbox(
-        "Display Time In",
-        options=list(timezones.keys()),
-        index=0,  # Default WIB
-        key="timezone_selector"
-    )
-    
-    st.session_state.user_timezone = timezones[selected_tz_display]
-    st.caption(f"⏰ Current time: {datetime.now(pytz.timezone(st.session_state.user_timezone)).strftime('%H:%M:%S')}")
+    # Show current WIB time (no selector)
+    st.subheader("🕐 Timezone")
+    st.info(f"**WIB (Jakarta)** - Fixed timezone")
+    current_time_wib = now_wib().strftime("%H:%M:%S")
+    st.caption(f"Current time: {current_time_wib}")
     
     st.divider()
     
@@ -612,86 +619,28 @@ with st.sidebar:
     st.subheader("🔔 Notifications")
     
     with st.expander("📱 Telegram Bot", expanded=False):
-        st.markdown("""
-        **Setup:**
-        1. Chat [@BotFather](https://t.me/BotFather)
-        2. `/newbot` → buat bot baru
-        3. Copy Bot Token
-        4. Chat [@userinfobot](https://t.me/userinfobot) untuk dapat Chat ID
+        st.info(f"""
+        **Status:** ✅ Configured
+        
+        Notifications will be sent to:
+        - Bot Token: `...{TELEGRAM_BOT_TOKEN[-10:]}`
+        - Chat ID: `{TELEGRAM_CHAT_ID}`
         """)
         
-        telegram_token = st.text_input(
-            "Bot Token",
-            value=st.session_state.telegram_token,
-            type="password",
-            key="telegram_token_input"
+        # Test notification button
+        if st.button("🧪 Test Notification", use_container_width=True, key="test_telegram"):
+            test_msg = f"🧪 *Test Notification*\n\nJKT48 Monitor aktif!\n\nTime: {now_wib().strftime('%H:%M:%S WIB')}"
+            if send_telegram_notification(test_msg):
+                st.success("✅ Test notification sent!")
+            else:
+                st.error("❌ Failed to send test notification")
+        
+        # Enable/disable toggle
+        st.session_state.notifications_enabled = st.checkbox(
+            "Enable Notifications",
+            value=st.session_state.get('notifications_enabled', False),
+            help="Receive Telegram alerts for stock changes"
         )
-        telegram_chat_id = st.text_input(
-            "Chat ID",
-            value=st.session_state.telegram_chat_id,
-            key="telegram_chat_id_input"
-        )
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("🧪 Test", key="test_telegram"):
-                if telegram_token and telegram_chat_id:
-                    st.session_state.telegram_token = telegram_token
-                    st.session_state.telegram_chat_id = telegram_chat_id
-                    if send_telegram_notification("✅ Test notification - Telegram is working!"):
-                        st.success("✅ Check your Telegram!")
-                    else:
-                        st.error("❌ Test failed")
-                else:
-                    st.warning("Fill both fields!")
-        
-        with col2:
-            if st.button("💾 Save", key="save_telegram"):
-                st.session_state.telegram_token = telegram_token
-                st.session_state.telegram_chat_id = telegram_chat_id
-                st.success("Saved!")
-    
-    with st.expander("💬 WhatsApp", expanded=False):
-        st.markdown("""
-        **Setup:**
-        1. Save +34 644 44 80 10
-        2. Send: "I allow callmebot to send me messages"
-        3. Copy API key dari balasan
-        """)
-        
-        whatsapp_phone = st.text_input(
-            "Phone (+country code)",
-            value=st.session_state.whatsapp_phone,
-            placeholder="+6281234567890",
-            key="whatsapp_phone_input"
-        )
-        whatsapp_apikey = st.text_input(
-            "API Key",
-            value=st.session_state.whatsapp_apikey,
-            type="password",
-            key="whatsapp_apikey_input"
-        )
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("🧪 Test", key="test_whatsapp"):
-                if whatsapp_phone and whatsapp_apikey:
-                    st.session_state.whatsapp_phone = whatsapp_phone
-                    st.session_state.whatsapp_apikey = whatsapp_apikey
-                    if send_whatsapp_notification("Test notification - WhatsApp is working!"):
-                        st.success("✅ Check WhatsApp!")
-                    else:
-                        st.error("❌ Test failed")
-                else:
-                    st.warning("Fill both fields!")
-        
-        with col2:
-            if st.button("💾 Save", key="save_whatsapp"):
-                st.session_state.whatsapp_phone = whatsapp_phone
-                st.session_state.whatsapp_apikey = whatsapp_apikey
-                st.success("Saved!")
-    
-    st.divider()
     
     st.divider()
     
@@ -945,8 +894,8 @@ if data:
                 )
     
     with tab3:
-        # Filters - now 4 columns to include Date
-        col1, col2, col3, col4 = st.columns(4)
+        # Filters - now 5 columns to include Date and Member
+        col1, col2, col3, col4, col5 = st.columns(5)
         
         with col1:
             # Date filter
@@ -959,44 +908,63 @@ if data:
             )
         
         with col2:
+            # Member filter (NEW!)
+            unique_members = sorted(df['Member'].unique())
+            member_filter_options = ['All Members'] + list(unique_members)
+            selected_member_filter = st.selectbox(
+                "Member",
+                options=member_filter_options,
+                index=0
+            )
+        
+        with col3:
             session_filter = st.multiselect(
                 "Session",
                 options=df['Session'].unique(),
                 default=df['Session'].unique()
             )
         
-        with col3:
+        with col4:
             team_filter = st.multiselect(
                 "Team",
                 options=df['Team'].unique(),
                 default=df['Team'].unique()
             )
         
-        with col4:
+        with col5:
             status_filter = st.multiselect(
                 "Status",
                 options=df['Status'].unique(),
                 default=df['Status'].unique()
             )
         
-        # Filtered data
-        if selected_date_filter == 'All Dates':
-            filtered_df = df[
-                (df['Session'].isin(session_filter)) &
-                (df['Team'].isin(team_filter)) &
-                (df['Status'].isin(status_filter))
-            ]
-        else:
-            filtered_df = df[
-                (df['Date'] == selected_date_filter) &
-                (df['Session'].isin(session_filter)) &
-                (df['Team'].isin(team_filter)) &
-                (df['Status'].isin(status_filter))
-            ]
+        # Filtered data - apply all filters
+        filtered_df = df.copy()
+        
+        # Date filter
+        if selected_date_filter != 'All Dates':
+            filtered_df = filtered_df[filtered_df['Date'] == selected_date_filter]
+        
+        # Member filter (NEW!)
+        if selected_member_filter != 'All Members':
+            filtered_df = filtered_df[filtered_df['Member'] == selected_member_filter]
+        
+        # Other filters
+        filtered_df = filtered_df[
+            (filtered_df['Session'].isin(session_filter)) &
+            (filtered_df['Team'].isin(team_filter)) &
+            (filtered_df['Status'].isin(status_filter))
+        ]
+        
+        # Replace Date with Date_Display for showing Indonesian format
+        display_df = filtered_df.copy()
+        if 'Date_Display' in display_df.columns:
+            display_df['Date'] = display_df['Date_Display']
+            display_df = display_df.drop(columns=['Date_Display'])
         
         # Display table
         st.dataframe(
-            filtered_df.style.map(
+            display_df.style.map(
                 lambda x: 'background-color: #ffebee' if x == 'Sold Out' else
                           'background-color: #fff9c4' if x == 'Low Stock' else
                           'background-color: #e8f5e9' if x == 'Available' else '',
@@ -1005,6 +973,8 @@ if data:
             use_container_width=True,
             hide_index=True
         )
+        
+        st.info(f"Showing {len(filtered_df)} of {len(df)} rows")
         
         # Download button
         csv = filtered_df.to_csv(index=False).encode('utf-8')
