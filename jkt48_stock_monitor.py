@@ -1003,7 +1003,21 @@ if data:
                 pass
         
         if not worker_issue:
-            st.info("💡 Change log diupdate oleh background worker yang jalan 24/7 di server. Semua user melihat log yang sama!")
+            col_info1, col_info2 = st.columns([3, 1])
+            with col_info1:
+                st.info("💡 Change log diupdate oleh background worker yang jalan 24/7 di server. Semua user melihat log yang sama!")
+            with col_info2:
+                if st.button("🗑️ Clear Old Log", help="Clear old log entries to show only new entries with correct date format"):
+                    try:
+                        # Save empty log
+                        with open("/mnt/user-data/outputs/change_log.json", 'w') as f:
+                            json.dump([], f)
+                        st.success("✅ Old log cleared! New changes will appear with correct format.")
+                        st.rerun()
+                    except:
+                        st.error("❌ Failed to clear log (file permission issue)")
+        
+        st.caption("ℹ️ Old log entries may show '(Event date not available)' - clear log to see new entries with correct Indonesian date format.")
         
         # Load change log from file
         file_change_log = load_change_log_from_file()
@@ -1120,7 +1134,25 @@ if data:
                     # Apply +1 day offset and format to Indonesian
                     date_display = format_event_date(event_date_str)
                 else:
-                    date_display = ""
+                    # Fallback for old entries without session_date
+                    # Try to get from 'date' or other fields
+                    old_date = change.get('date', '') or change.get('event_date', '')
+                    if old_date:
+                        try:
+                            # Parse various formats
+                            if 'T' in old_date:
+                                # ISO format: "2026-05-12T17:00:00.000Z"
+                                dt = datetime.fromisoformat(old_date.replace('Z', '+00:00'))
+                                date_str = dt.strftime('%Y-%m-%d')
+                            else:
+                                date_str = old_date
+                            
+                            # Apply +1 day offset
+                            date_display = format_event_date(date_str)
+                        except:
+                            date_display = old_date
+                    else:
+                        date_display = ""
                 
                 # Fix Unknown Event issue
                 event_name = change.get('event', '')
@@ -1195,17 +1227,31 @@ if data:
                     </div>
                     """, unsafe_allow_html=True)
             
-            # Export button
+            # Export and Clear buttons
             st.divider()
-            col1, col2 = st.columns([3, 1])
+            col1, col2, col3 = st.columns([2, 1, 1])
             with col2:
+                if st.button("🗑️ Clear Old Logs", help="Remove old log entries with incompatible date format"):
+                    # Keep only entries with session_date field (new format)
+                    new_format_changes = [c for c in all_changes if c.get('session_date')]
+                    
+                    # Save cleaned log
+                    try:
+                        with open("/mnt/user-data/outputs/change_log.json", 'w') as f:
+                            json.dump(new_format_changes, f, indent=2)
+                        st.success(f"✅ Cleared {len(all_changes) - len(new_format_changes)} old entries!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+            
+            with col3:
                 if st.button("📥 Export CSV"):
                     df_changes = pd.DataFrame(filtered_changes)
                     csv = df_changes.to_csv(index=False).encode('utf-8')
                     st.download_button(
                         "Download CSV",
                         csv,
-                        f"change_log_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                        f"change_log_{now_wib().strftime('%Y%m%d_%H%M')}.csv",
                         "text/csv"
                     )
         else:
