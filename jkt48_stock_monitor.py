@@ -175,22 +175,73 @@ TEAM_COLORS = {
 }
 
 def fetch_data():
-    """Fetch data from JKT48 API"""
-    try:
-        response = requests.get(
-            list(API_ENDPOINTS.values())[0],
-            timeout=10,
-            headers={'User-Agent': 'Mozilla/5.0'}
-        )
-        response.raise_for_status()
-        data = response.json()
-        
-        if data.get('status') and data.get('data'):
-            return data['data']
-        return None
-    except Exception as e:
-        st.error(f"Error fetching API: {e}")
-        return None
+    """Fetch data from JKT48 API with retry logic"""
+    max_retries = 3
+    retry_delay = 2
+    
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(
+                list(API_ENDPOINTS.values())[0],
+                timeout=15,
+                headers={
+                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+                    'Accept': 'application/json',
+                    'Referer': 'https://jkt48.com/exclusive'
+                }
+            )
+            
+            # Check for HTML response (waiting room)
+            content_type = response.headers.get('Content-Type', '')
+            if 'text/html' in content_type:
+                if attempt < max_retries - 1:
+                    st.warning(f"⚠️ Cloudflare waiting room detected. Retrying in {retry_delay}s... (Attempt {attempt + 1}/{max_retries})")
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    st.error("❌ Cloudflare waiting room active. Please wait a few minutes and refresh.")
+                    return None
+            
+            response.raise_for_status()
+            data = response.json()
+            
+            if data.get('status') and data.get('data'):
+                return data['data']
+            else:
+                st.error(f"⚠️ API returned invalid data structure")
+                return None
+                
+        except requests.exceptions.Timeout:
+            if attempt < max_retries - 1:
+                st.warning(f"⏱️ Request timeout. Retrying... (Attempt {attempt + 1}/{max_retries})")
+                time.sleep(retry_delay)
+                continue
+            else:
+                st.error("❌ Connection timeout. Please check your internet connection.")
+                return None
+                
+        except requests.exceptions.HTTPError as e:
+            st.error(f"❌ HTTP Error {e.response.status_code}: {e}")
+            return None
+            
+        except requests.exceptions.RequestException as e:
+            if attempt < max_retries - 1:
+                st.warning(f"🔄 Connection error. Retrying... (Attempt {attempt + 1}/{max_retries})")
+                time.sleep(retry_delay)
+                continue
+            else:
+                st.error(f"❌ Network error: {e}")
+                return None
+                
+        except json.JSONDecodeError:
+            st.error("❌ Invalid JSON response from API")
+            return None
+            
+        except Exception as e:
+            st.error(f"❌ Unexpected error: {e}")
+            return None
+    
+    return None
 
 def process_data(data):
     """Process API data into dataframe with adjusted dates"""
@@ -345,6 +396,28 @@ with st.sidebar:
     # Manual refresh
     if st.button("🔄 Refresh Now", use_container_width=True):
         st.rerun()
+    
+    # API Status (debug info)
+    st.divider()
+    with st.expander("🔍 API Status & Debug", expanded=False):
+        st.caption(f"**API Endpoint:**")
+        st.code("https://jkt48.com/api/v1/exclusives/EXBE10?lang=id", language="text")
+        
+        if st.session_state.last_update:
+            st.caption(f"**Last Successful Fetch:**")
+            st.text(st.session_state.last_update.strftime("%Y-%m-%d %H:%M:%S WIB"))
+        else:
+            st.warning("No successful fetch yet")
+        
+        if st.button("🧪 Test API Connection", use_container_width=True):
+            with st.spinner("Testing API..."):
+                test_data = fetch_data()
+                if test_data:
+                    st.success("✅ API connection successful!")
+                    session_count = len(test_data.get('session', []))
+                    st.info(f"Found {session_count} sessions")
+                else:
+                    st.error("❌ API connection failed")
 
 # Fetch data
 with st.spinner("Loading data..."):
@@ -368,7 +441,23 @@ st.session_state.previous_data = st.session_state.data
 df = process_data(st.session_state.data) if st.session_state.data else pd.DataFrame()
 
 if df.empty:
-    st.error("❌ Failed to load data. Please try again.")
+    st.error("❌ Failed to load data from JKT48 API")
+    st.info("""
+    **Possible causes:**
+    1. Cloudflare waiting room is active
+    2. API is temporarily down
+    3. Network connectivity issue
+    
+    **Solutions:**
+    - Wait 2-3 minutes and click "Refresh Now"
+    - Check if https://jkt48.com is accessible
+    - Try again in a few minutes
+    """)
+    
+    # Show retry button
+    if st.button("🔄 Retry Now", type="primary"):
+        st.rerun()
+    
     st.stop()
 
 # Event info subtitle
