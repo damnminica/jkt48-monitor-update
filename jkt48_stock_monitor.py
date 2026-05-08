@@ -110,6 +110,12 @@ def load_data_from_worker():
                 else:
                     st.warning(f"⚠️ Background worker data is {int(seconds_ago)}s old. Worker might be stopped.")
                     return data
+        else:
+            st.info(f"ℹ️ Worker file not found at: {PREVIOUS_DATA_FILE}")
+            st.info("Background worker is probably still starting. First fetch takes ~30 seconds.")
+            return None
+    except json.JSONDecodeError as e:
+        st.error(f"Error parsing worker data: {e}")
         return None
     except Exception as e:
         st.error(f"Error loading worker data: {e}")

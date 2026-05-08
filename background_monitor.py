@@ -121,10 +121,15 @@ def load_previous_data():
 def save_previous_data(data):
     """Save current API data"""
     try:
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(PREVIOUS_DATA_FILE), exist_ok=True)
+        
         with open(PREVIOUS_DATA_FILE, 'w') as f:
             json.dump(data, f, indent=2)
+        
+        print(f"  💾 Saved to {PREVIOUS_DATA_FILE}")
     except Exception as e:
-        print(f"Error saving previous data: {e}")
+        print(f"  ❌ Error saving previous data: {e}")
 
 def load_change_log():
     """Load change log"""
