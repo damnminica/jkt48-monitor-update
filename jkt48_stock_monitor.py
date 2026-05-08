@@ -93,6 +93,28 @@ API_ENDPOINTS = {
     "We Are Love, Dream, Passion on Fire": "https://jkt48.com/api/v1/exclusives/EXBE10?lang=id"
 }
 
+PREVIOUS_DATA_FILE = "/mnt/user-data/outputs/previous_data.json"
+
+def load_data_from_worker():
+    """Load data from background worker's saved file"""
+    try:
+        if os.path.exists(PREVIOUS_DATA_FILE):
+            with open(PREVIOUS_DATA_FILE, 'r') as f:
+                data = json.load(f)
+                # Check if file was updated recently (within last 2 minutes)
+                mtime = os.path.getmtime(PREVIOUS_DATA_FILE)
+                seconds_ago = time.time() - mtime
+                
+                if seconds_ago < 120:  # Less than 2 minutes old
+                    return data
+                else:
+                    st.warning(f"⚠️ Background worker data is {int(seconds_ago)}s old. Worker might be stopped.")
+                    return data
+        return None
+    except Exception as e:
+        st.error(f"Error loading worker data: {e}")
+        return None
+
 # Member-Team Mapping
 MEMBER_TEAM_MAP = {
     # LOVE Team (15 members)
@@ -421,10 +443,21 @@ with st.sidebar:
 
 # Fetch data
 with st.spinner("Loading data..."):
-    data = fetch_data()
+    # Try loading from background worker file first
+    data = load_data_from_worker()
+    
     if data:
         st.session_state.data = data
         st.session_state.last_update = now_wib()
+        st.session_state.data_source = "background_worker"
+    else:
+        # Fallback: Try fetching from API directly
+        st.info("📡 Background worker data not available. Trying API directly...")
+        data = fetch_data()
+        if data:
+            st.session_state.data = data
+            st.session_state.last_update = now_wib()
+            st.session_state.data_source = "api_direct"
 
 # Check for changes and send notifications
 if st.session_state.data and st.session_state.previous_data:
@@ -441,17 +474,17 @@ st.session_state.previous_data = st.session_state.data
 df = process_data(st.session_state.data) if st.session_state.data else pd.DataFrame()
 
 if df.empty:
-    st.error("❌ Failed to load data from JKT48 API")
+    st.error("❌ No data available")
     st.info("""
     **Possible causes:**
-    1. Cloudflare waiting room is active
-    2. API is temporarily down
+    1. Background worker hasn't started yet
+    2. Background worker hasn't completed first fetch
     3. Network connectivity issue
     
     **Solutions:**
-    - Wait 2-3 minutes and click "Refresh Now"
-    - Check if https://jkt48.com is accessible
-    - Try again in a few minutes
+    - Wait 30-60 seconds for background worker to fetch data
+    - Check Railway logs to verify worker is running
+    - Click "Refresh Now" to retry
     """)
     
     # Show retry button
@@ -485,9 +518,14 @@ with col4:
 
 with col5:
     if st.session_state.last_update:
+        update_time = st.session_state.last_update.strftime("%H:%M:%S")
+        source = st.session_state.get('data_source', 'unknown')
+        source_emoji = "🤖" if source == "background_worker" else "📡"
         st.metric(
-            "Last Update (WIB)",
-            st.session_state.last_update.strftime("%H:%M:%S")
+            f"Last Update {source_emoji}",
+            update_time,
+            delta="WIB" if source == "background_worker" else "API",
+            delta_color="off"
         )
 
 # Tabs
