@@ -260,6 +260,10 @@ def detect_changes(new_data, prev_data, event_name, config):
         if not prev_session:
             continue
         
+        # Get session date with +1 day offset for consistency
+        original_date = new_session.get('date', '')
+        adjusted_date = get_adjusted_event_date(original_date)
+        
         for new_detail in new_session['session_detail']:
             prev_detail = next(
                 (d for d in prev_session['session_detail']
@@ -282,9 +286,10 @@ def detect_changes(new_data, prev_data, event_name, config):
                     'event': event_name,
                     'member': new_detail['jkt48_member_name'],
                     'session': new_session['label'],
+                    'session_date': adjusted_date,  # YYYY-MM-DD format (+1 day)
                     'returned_quota': new_available,
                     'refunded_tickets': prev_sold - new_sold if new_sold < prev_sold else 0,
-                    'timestamp': datetime.now(timezone.utc).isoformat()
+                    'timestamp': now_wib().isoformat()  # WIB timezone
                 }
                 changes.append(change)
                 
@@ -303,10 +308,11 @@ def detect_changes(new_data, prev_data, event_name, config):
                     'event': event_name,
                     'member': new_detail['jkt48_member_name'],
                     'session': new_session['label'],
+                    'session_date': adjusted_date,
                     'old_quota': prev_available,
                     'new_quota': new_available,
                     'difference': new_available - prev_available,
-                    'timestamp': datetime.now(timezone.utc).isoformat()
+                    'timestamp': now_wib().isoformat()
                 }
                 changes.append(change)
                 
@@ -322,11 +328,12 @@ def detect_changes(new_data, prev_data, event_name, config):
                     'event': event_name,
                     'member': new_detail['jkt48_member_name'],
                     'session': new_session['label'],
+                    'session_date': adjusted_date,
                     'tickets_bought': sold_diff,
                     'old_sold': prev_sold,
                     'new_sold': new_sold,
                     'remaining': new_available,
-                    'timestamp': datetime.now(timezone.utc).isoformat()
+                    'timestamp': now_wib().isoformat()
                 }
                 changes.append(change)
                 
@@ -344,11 +351,12 @@ def detect_changes(new_data, prev_data, event_name, config):
                     'event': event_name,
                     'member': new_detail['jkt48_member_name'],
                     'session': new_session['label'],
+                    'session_date': adjusted_date,
                     'refunded_tickets': refund_diff,
                     'old_sold': prev_sold,
                     'new_sold': new_sold,
                     'new_available': new_available,
-                    'timestamp': datetime.now(timezone.utc).isoformat()
+                    'timestamp': now_wib().isoformat()
                 }
                 changes.append(change)
                 
@@ -363,8 +371,9 @@ def detect_changes(new_data, prev_data, event_name, config):
                     'event': event_name,
                     'member': new_detail['jkt48_member_name'],
                     'session': new_session['label'],
+                    'session_date': adjusted_date,
                     'last_available': prev_available,
-                    'timestamp': datetime.now(timezone.utc).isoformat()
+                    'timestamp': now_wib().isoformat()
                 }
                 changes.append(change)
                 

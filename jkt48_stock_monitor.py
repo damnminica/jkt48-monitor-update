@@ -894,21 +894,29 @@ if data:
                 )
     
     with tab3:
-        # Filters - now 5 columns to include Date and Member
-        col1, col2, col3, col4, col5 = st.columns(5)
+        # Filters - 4 columns (removed Session filter)
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            # Date filter
-            unique_dates = sorted(df['Date'].unique(), reverse=True)
-            date_filter_options = ['All Dates'] + list(unique_dates)
-            selected_date_filter = st.selectbox(
+            # Date filter - show Indonesian format
+            unique_dates_raw = sorted(df['Date'].unique(), reverse=True)
+            # Create mapping of display dates to raw dates
+            date_display_map = {}
+            for raw_date in unique_dates_raw:
+                # Find first matching row to get display format
+                matching_row = df[df['Date'] == raw_date].iloc[0]
+                display_date = matching_row['Date_Display']
+                date_display_map[display_date] = raw_date
+            
+            date_filter_options = ['All Dates'] + list(date_display_map.keys())
+            selected_date_display = st.selectbox(
                 "Event Date",
                 options=date_filter_options,
                 index=0
             )
         
         with col2:
-            # Member filter (NEW!)
+            # Member filter
             unique_members = sorted(df['Member'].unique())
             member_filter_options = ['All Members'] + list(unique_members)
             selected_member_filter = st.selectbox(
@@ -918,20 +926,13 @@ if data:
             )
         
         with col3:
-            session_filter = st.multiselect(
-                "Session",
-                options=df['Session'].unique(),
-                default=df['Session'].unique()
-            )
-        
-        with col4:
             team_filter = st.multiselect(
                 "Team",
                 options=df['Team'].unique(),
                 default=df['Team'].unique()
             )
         
-        with col5:
+        with col4:
             status_filter = st.multiselect(
                 "Status",
                 options=df['Status'].unique(),
@@ -942,25 +943,24 @@ if data:
         filtered_df = df.copy()
         
         # Date filter
-        if selected_date_filter != 'All Dates':
-            filtered_df = filtered_df[filtered_df['Date'] == selected_date_filter]
+        if selected_date_display != 'All Dates':
+            selected_date_raw = date_display_map[selected_date_display]
+            filtered_df = filtered_df[filtered_df['Date'] == selected_date_raw]
         
-        # Member filter (NEW!)
+        # Member filter
         if selected_member_filter != 'All Members':
             filtered_df = filtered_df[filtered_df['Member'] == selected_member_filter]
         
-        # Other filters
+        # Other filters (no Session filter!)
         filtered_df = filtered_df[
-            (filtered_df['Session'].isin(session_filter)) &
             (filtered_df['Team'].isin(team_filter)) &
             (filtered_df['Status'].isin(status_filter))
         ]
         
-        # Replace Date with Date_Display for showing Indonesian format
+        # Prepare display dataframe with Indonesian date format
         display_df = filtered_df.copy()
-        if 'Date_Display' in display_df.columns:
-            display_df['Date'] = display_df['Date_Display']
-            display_df = display_df.drop(columns=['Date_Display'])
+        display_df['Date'] = display_df['Date_Display']  # Replace with Indonesian format
+        display_df = display_df.drop(columns=['Date_Display'])  # Remove duplicate column
         
         # Display table
         st.dataframe(
@@ -1052,17 +1052,29 @@ if data:
             )
         
         with col2:
-            # Date filter by EVENT DATE (not transaction date)
+            # Date filter by EVENT DATE (not transaction date) - show Indonesian format
             if all_changes:
                 # Get unique event dates from changes
-                event_dates_in_log = set()
+                event_dates_raw = set()
                 for change in all_changes:
                     session_date = change.get('session_date', '')
                     if session_date:
-                        event_dates_in_log.add(session_date)
+                        event_dates_raw.add(session_date)
                 
-                date_options = ['All Dates'] + sorted(list(event_dates_in_log), reverse=True)
-                selected_date = st.selectbox("Filter by Event Date", date_options, index=0)
+                # Create display mapping
+                date_display_map_log = {}
+                for raw_date in sorted(list(event_dates_raw), reverse=True):
+                    display_date = format_event_date(raw_date)
+                    date_display_map_log[display_date] = raw_date
+                
+                date_options = ['All Dates'] + list(date_display_map_log.keys())
+                selected_date_display_log = st.selectbox("Filter by Event Date", date_options, index=0)
+                
+                # Convert back to raw date for filtering
+                if selected_date_display_log != 'All Dates':
+                    selected_date = date_display_map_log[selected_date_display_log]
+                else:
+                    selected_date = "All Dates"
             else:
                 selected_date = "All Dates"
         
@@ -1088,35 +1100,33 @@ if data:
                 timestamp_str = change.get('timestamp', '')
                 ts = change.get('timestamp', '')
                 
-                # Parse and format transaction timestamp
+                # Parse and format transaction timestamp in WIB
                 if isinstance(ts, str):
                     try:
                         dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
                         if dt.tzinfo is None:
                             dt = dt.replace(tzinfo=pytz.UTC)
-                        local_dt = dt.astimezone(selected_tz)
-                        # Format: "DD/MM/YYYY HH:MM:SS"
-                        timestamp = local_dt.strftime("%d/%m/%Y %H:%M:%S")
+                        wib_dt = dt.astimezone(WIB)
+                        # Format: "DD/MM/YYYY HH:MM:SS WIB"
+                        timestamp = wib_dt.strftime("%d/%m/%Y %H:%M:%S")
                     except:
                         timestamp = timestamp_str
                 else:
                     timestamp = str(ts) if ts else ""
                 
-                # Get event date from session_date
+                # Get event date from session_date and apply +1 day offset
                 event_date_str = change.get('session_date', '')
                 if event_date_str:
-                    try:
-                        # Parse event date (format: "2026-05-08")
-                        event_date = datetime.strptime(event_date_str, '%Y-%m-%d')
-                        # Format: "Jumat, 08 Mei 2026"
-                        locale.setlocale(locale.LC_TIME, 'id_ID.UTF-8')
-                        date_display = event_date.strftime("%A, %d %B %Y")
-                    except:
-                        date_display = event_date_str
+                    # Apply +1 day offset and format to Indonesian
+                    date_display = format_event_date(event_date_str)
                 else:
                     date_display = ""
                 
-                event_name = change.get('event', 'Unknown Event')
+                # Fix Unknown Event issue
+                event_name = change.get('event', '')
+                if not event_name or event_name == 'Unknown Event':
+                    # Default to current monitored event
+                    event_name = "We Are Love, Dream, Passion on Fire"
                 session_info = change.get('session', 'N/A')
                 
                 # Stock Return (dari sold out ke available)
