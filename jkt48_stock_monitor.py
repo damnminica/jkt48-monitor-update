@@ -166,7 +166,6 @@ def load_config_from_file():
     
     return {
         "telegram": {"token": "", "chat_id": "", "enabled": False},
-        "whatsapp": {"phone": "", "apikey": "", "enabled": False},
         "monitored_events": list(API_ENDPOINTS.keys())
     }
 
@@ -181,10 +180,6 @@ if 'telegram_token' not in st.session_state:
     st.session_state.telegram_token = ""
 if 'telegram_chat_id' not in st.session_state:
     st.session_state.telegram_chat_id = ""
-if 'whatsapp_phone' not in st.session_state:
-    st.session_state.whatsapp_phone = ""
-if 'whatsapp_apikey' not in st.session_state:
-    st.session_state.whatsapp_apikey = ""
 if 'notifications_enabled' not in st.session_state:
     st.session_state.notifications_enabled = False
 
@@ -316,7 +311,6 @@ def detect_changes(new_data):
                     else:
                         msg = f"♻️ *STOCK KEMBALI!*\n{change['member']} ({change['session']})\nSold Out → {new_available} tiket tersedia\n(Kemungkinan tambahan quota)"
                     send_telegram_notification(msg)
-                    send_whatsapp_notification(msg)
             
             # 2. Stock increase (quota naik tapi belum pernah sold out)
             elif new_available > prev_available and prev_available > 0:
@@ -335,7 +329,6 @@ def detect_changes(new_data):
                 if st.session_state.notifications_enabled:
                     msg = f"📈 *STOCK NAIK!*\n{change['member']} ({change['session']})\n{change['old_quota']} → {change['new_quota']} (+{change['difference']})"
                     send_telegram_notification(msg)
-                    send_whatsapp_notification(msg)
             
             # 3. New transaction (tickets_sold bertambah)
             elif new_sold > prev_sold:
@@ -358,7 +351,6 @@ def detect_changes(new_data):
                     if sold_diff >= 5 or new_available == 0:
                         msg = f"🎫 *TRANSAKSI BARU!*\n{change['member']} ({change['session']})\n{sold_diff} tiket terjual\nSisa: {new_available}"
                         send_telegram_notification(msg)
-                        send_whatsapp_notification(msg)
             
             # 4. Refund/Cancellation (tickets_sold berkurang)
             elif new_sold < prev_sold and prev_available > 0:
@@ -380,7 +372,6 @@ def detect_changes(new_data):
                     # Notify for any refund
                     msg = f"💳 *REFUND/CANCEL!*\n{change['member']} ({change['session']})\n{refund_diff} transaksi dibatalkan\nStock kembali: {new_available}"
                     send_telegram_notification(msg)
-                    send_whatsapp_notification(msg)
             
             # 5. Sold out (available jadi 0)
             if new_available == 0 and prev_available > 0:
@@ -397,7 +388,6 @@ def detect_changes(new_data):
                 if st.session_state.notifications_enabled:
                     msg = f"🔴 *SOLD OUT!*\n{change['member']} ({change['session']})\nHabis dari {change['last_available']} tiket!"
                     send_telegram_notification(msg)
-                    send_whatsapp_notification(msg)
     
     if changes:
         st.session_state.change_log.extend(changes)
@@ -1115,16 +1105,35 @@ if data:
                 ts = change.get('timestamp', '')
                 
                 # Parse and format transaction timestamp in WIB
-                if isinstance(ts, str):
+                # Handle multiple formats:
+                # 1. "2026-05-09T07:33:45.013670+00:00" (ISO with timezone)
+                # 2. "2026-05-09T07:33:45.013670+07:00" (ISO with WIB)
+                # 3. "2026-05-09 07:33:45.013670" (UTC without timezone - old format)
+                # 4. "2026-05-09T07:33:45.013670" (ISO without timezone)
+                if isinstance(ts, str) and ts:
                     try:
-                        dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                        # Replace space with T for ISO parsing
+                        ts_clean = ts.replace(' ', 'T').replace('Z', '+00:00')
+                        dt = datetime.fromisoformat(ts_clean)
+                        
+                        # If no timezone info, assume it's UTC (old format)
                         if dt.tzinfo is None:
-                            dt = dt.replace(tzinfo=pytz.UTC)
+                            dt = pytz.UTC.localize(dt)
+                        
+                        # Convert to WIB
                         wib_dt = dt.astimezone(WIB)
-                        # Format: "DD/MM/YYYY HH:MM:SS WIB"
+                        # Format: "DD/MM/YYYY HH:MM:SS"
                         timestamp = wib_dt.strftime("%d/%m/%Y %H:%M:%S")
-                    except:
-                        timestamp = timestamp_str
+                    except Exception as e:
+                        # Fallback: try basic parsing
+                        try:
+                            # Format: "2026-05-09 07:33:45.013670"
+                            dt = datetime.strptime(ts.split('.')[0], "%Y-%m-%d %H:%M:%S")
+                            dt = pytz.UTC.localize(dt)  # Assume UTC for old entries
+                            wib_dt = dt.astimezone(WIB)
+                            timestamp = wib_dt.strftime("%d/%m/%Y %H:%M:%S")
+                        except:
+                            timestamp = timestamp_str
                 else:
                     timestamp = str(ts) if ts else ""
                 

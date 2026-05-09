@@ -59,7 +59,7 @@ def get_adjusted_event_date(api_date_str):
     except:
         return api_date_str
 
-# Load config (Telegram/WhatsApp settings + Cloudflare cookie)
+# Load config (Telegram settings + Cloudflare cookie)
 def load_config():
     """Load configuration from file"""
     try:
@@ -71,7 +71,6 @@ def load_config():
     
     return {
         "telegram": {"token": "", "chat_id": "", "enabled": False},
-        "whatsapp": {"phone": "", "apikey": "", "enabled": False},
         "monitored_events": list(API_ENDPOINTS.keys()),
         "cf_cookie_name": "",   # Dynamic cookie name (e.g., __cfwaitingroom_xxx)
         "cf_cookie_value": ""   # Cookie value
@@ -178,7 +177,6 @@ def send_telegram_notification(message):
         response = requests.get(url, timeout=5)
         return response.status_code == 200
     except Exception as e:
-        print(f"WhatsApp error: {e}")
         return False
 
 def fetch_api_data(api_url, cookies=None):
@@ -299,7 +297,6 @@ def detect_changes(new_data, prev_data, event_name, config):
                     msg = f"♻️ *STOCK KEMBALI!*\n[{event_name}]\n{change['member']} ({change['session']})\nSold Out → {new_available} tiket"
                 
                 send_telegram_notification(msg)
-                # send_whatsapp_notification(config, msg)
             
             # 2. Stock increase (not from sold out)
             elif new_available > prev_available and prev_available > 0:
@@ -318,7 +315,6 @@ def detect_changes(new_data, prev_data, event_name, config):
                 
                 msg = f"📈 *STOCK NAIK!*\n[{event_name}]\n{change['member']} ({change['session']})\n{change['old_quota']} → {change['new_quota']} (+{change['difference']})"
                 send_telegram_notification(msg)
-                # send_whatsapp_notification(config, msg)
             
             # 3. New transaction
             elif new_sold > prev_sold:
@@ -341,7 +337,6 @@ def detect_changes(new_data, prev_data, event_name, config):
                 if sold_diff >= 5 or new_available == 0:
                     msg = f"🎫 *TRANSAKSI BARU!*\n[{event_name}]\n{change['member']} ({change['session']})\n{sold_diff} tiket terjual\nSisa: {new_available}"
                     send_telegram_notification(msg)
-                    # send_whatsapp_notification(config, msg)
             
             # 4. Refund (tickets_sold decreased)
             elif new_sold < prev_sold and prev_available > 0:
@@ -362,7 +357,6 @@ def detect_changes(new_data, prev_data, event_name, config):
                 
                 msg = f"💳 *REFUND/CANCEL!*\n[{event_name}]\n{change['member']} ({change['session']})\n{refund_diff} dibatalkan\nStock: {new_available}"
                 send_telegram_notification(msg)
-                # send_whatsapp_notification(config, msg)
             
             # 5. Sold out
             if new_available == 0 and prev_available > 0:
@@ -379,7 +373,6 @@ def detect_changes(new_data, prev_data, event_name, config):
                 
                 msg = f"🔴 *SOLD OUT!*\n[{event_name}]\n{change['member']} ({change['session']})\nHabis dari {change['last_available']} tiket!"
                 send_telegram_notification(msg)
-                # send_whatsapp_notification(config, msg)
     
     return changes
 
