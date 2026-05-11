@@ -21,6 +21,38 @@ echo "📂 Creating output directory..."
 mkdir -p /mnt/user-data/outputs
 echo "✅ Output directory ready"
 
+# Restore change log from backup if exists (one-time restore)
+if [ -f "change_log_backup.json" ] && [ ! -s "/mnt/user-data/outputs/change_log.json" ]; then
+    echo "📥 Restoring change log from backup..."
+    cp change_log_backup.json /mnt/user-data/outputs/change_log.json
+    echo "✅ Change log restored ($(wc -l < /mnt/user-data/outputs/change_log.json) lines)"
+elif [ -f "change_log_backup.json" ] && [ -s "/mnt/user-data/outputs/change_log.json" ]; then
+    echo "ℹ️ Change log already exists, merging backup..."
+    python3 -c "
+import json
+try:
+    with open('/mnt/user-data/outputs/change_log.json', 'r') as f:
+        existing = json.load(f)
+    with open('change_log_backup.json', 'r') as f:
+        backup = json.load(f)
+    
+    # Merge - avoid duplicates by timestamp
+    existing_timestamps = {entry.get('timestamp') for entry in existing}
+    new_entries = [entry for entry in backup if entry.get('timestamp') not in existing_timestamps]
+    
+    merged = existing + new_entries
+    # Sort by timestamp (newest first)
+    merged.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+    
+    with open('/mnt/user-data/outputs/change_log.json', 'w') as f:
+        json.dump(merged, f, indent=2)
+    
+    print(f'✅ Merged: {len(existing)} existing + {len(new_entries)} new = {len(merged)} total')
+except Exception as e:
+    print(f'⚠️ Merge failed: {e}')
+"
+fi
+
 # Check if background_monitor.py exists
 if [ ! -f "background_monitor.py" ]; then
     echo "❌ ERROR: background_monitor.py not found!"

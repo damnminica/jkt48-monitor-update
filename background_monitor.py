@@ -19,10 +19,12 @@ TELEGRAM_BOT_TOKEN = "8541605155:AAFlFyF1g2DkW-ZonmX2H_7S-k67n3JKjWE"
 TELEGRAM_CHAT_ID = "824000905"
 
 # Configuration
+# IMPORTANT: Must match dashboard's API_ENDPOINTS to ensure all events are monitored
 API_ENDPOINTS = {
-    "Event EXE588": "https://jkt48.com/api/v1/exclusives/EXE588?lang=id",
-    "Event EX579E": "https://jkt48.com/api/v1/exclusives/EX579E?lang=id",
+    "MnG Love Dream Passion": "https://jkt48.com/api/v1/exclusives/EXE588?lang=id",
+    "2shot Love Dream Passion": "https://jkt48.com/api/v1/exclusives/EX579E?lang=id",
     "Love Dream Passion BTS": "https://jkt48.com/api/v1/exclusives/EXBE10?lang=id",
+    "We Are Love, Dream, Passion on Fire": "https://jkt48.com/api/v1/exclusives/EX3725?lang=id",
 }
 
 REFRESH_INTERVAL = 30  # seconds
