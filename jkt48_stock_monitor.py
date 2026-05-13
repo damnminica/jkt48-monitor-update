@@ -123,8 +123,8 @@ st.markdown("""
 API_ENDPOINTS = {
     "MnG Love Dream Passion": "https://jkt48.com/api/v1/exclusives/EXE588?lang=id",
     "2shot Love Dream Passion": "https://jkt48.com/api/v1/exclusives/EX579E?lang=id",
-    "Love Dream Passion BTS": "https://jkt48.com/api/v1/exclusives/EXBE10?lang=id",
-    "We Are Love, Dream, Passion on Fire": "https://jkt48.com/api/v1/exclusives/EX3725?lang=id",
+    "Love Dream Passion - Music Video Behind The Scenes": "https://jkt48.com/api/v1/exclusives/EXBE10?lang=id",
+    "We Are Love, Dream Team, Passion On Fire!": "https://jkt48.com/api/v1/exclusives/EX3725?lang=id",
 }
 
 # File paths for background worker

@@ -21,6 +21,39 @@ echo "📂 Creating output directory..."
 mkdir -p /mnt/user-data/outputs
 echo "✅ Output directory ready"
 
+# CRITICAL: Delete old monitor_config.json to force using new event names
+# Old config may have outdated event names that won't match current API_ENDPOINTS
+if [ -f "/mnt/user-data/outputs/monitor_config.json" ]; then
+    echo "🔄 Removing old monitor_config.json to refresh event names..."
+    rm /mnt/user-data/outputs/monitor_config.json
+    echo "✅ Old config removed"
+fi
+
+# Also reset previous_data.json if event names changed (will rebuild baseline)
+# Only if it has old event names
+if [ -f "/mnt/user-data/outputs/previous_data.json" ]; then
+    python3 -c "
+import json
+try:
+    with open('/mnt/user-data/outputs/previous_data.json', 'r') as f:
+        data = json.load(f)
+    
+    # Check if it has old event names
+    old_names = ['Event EXE588', 'Event EX579E', 'Love Dream Passion BTS', 'We Are Love, Dream, Passion on Fire']
+    has_old = any(name in data for name in old_names)
+    
+    if has_old:
+        print('🔄 Old event names detected in previous_data.json - resetting...')
+        with open('/mnt/user-data/outputs/previous_data.json', 'w') as f:
+            json.dump({}, f)
+        print('✅ Previous data reset (will rebuild baseline)')
+    else:
+        print('✅ Previous data is using current event names')
+except Exception as e:
+    print(f'⚠️ Could not check previous_data.json: {e}')
+"
+fi
+
 # Restore change log from backup if exists (one-time restore)
 if [ -f "change_log_backup.json" ] && [ ! -s "/mnt/user-data/outputs/change_log.json" ]; then
     echo "📥 Restoring change log from backup..."

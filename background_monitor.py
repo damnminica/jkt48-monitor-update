@@ -23,8 +23,8 @@ TELEGRAM_CHAT_ID = "824000905"
 API_ENDPOINTS = {
     "MnG Love Dream Passion": "https://jkt48.com/api/v1/exclusives/EXE588?lang=id",
     "2shot Love Dream Passion": "https://jkt48.com/api/v1/exclusives/EX579E?lang=id",
-    "Love Dream Passion BTS": "https://jkt48.com/api/v1/exclusives/EXBE10?lang=id",
-    "We Are Love, Dream, Passion on Fire": "https://jkt48.com/api/v1/exclusives/EX3725?lang=id",
+    "Love Dream Passion - Music Video Behind The Scenes": "https://jkt48.com/api/v1/exclusives/EXBE10?lang=id",
+    "We Are Love, Dream Team, Passion On Fire!": "https://jkt48.com/api/v1/exclusives/EX3725?lang=id",
 }
 
 REFRESH_INTERVAL = 30  # seconds
@@ -419,51 +419,75 @@ def monitor_loop():
             print(f"  📋 Current log has {len(change_log)} entries")
             
             all_changes = []
-            monitored_events = config.get("monitored_events", list(API_ENDPOINTS.keys()))
+            # CRITICAL FIX: Always use current API_ENDPOINTS to ensure all events monitored
+            # This prevents using outdated event names from old config file
+            monitored_events = list(API_ENDPOINTS.keys())
             
-            print(f"  🎯 Monitoring {len(monitored_events)} events")
+            print(f"  🎯 Monitoring {len(monitored_events)} events:")
+            for ev in monitored_events:
+                print(f"     - {ev}")
             
-            # Monitor each event
+            # Monitor each event - track status per event
+            event_status = {}
+            
             for event_name in monitored_events:
                 if event_name not in API_ENDPOINTS:
                     print(f"  ⚠️  Skipping unknown event: {event_name}")
+                    event_status[event_name] = "SKIPPED (not in API_ENDPOINTS)"
                     continue
                 
                 api_url = API_ENDPOINTS[event_name]
-                print(f"  📡 Fetching: {event_name}...")
+                print(f"\n  📡 [{event_name}]")
+                print(f"     URL: {api_url}")
                 
                 # Fetch new data with cookie
                 new_data = fetch_api_data(api_url, cookies=cf_cookies)
                 
                 if not new_data:
-                    print(f"  ❌ Failed to fetch: {event_name}")
+                    print(f"     ❌ FETCH FAILED")
+                    event_status[event_name] = "FETCH FAILED"
                     consecutive_errors += 1
                     continue
                 
-                print(f"  ✅ Data fetched successfully")
+                # Log session count
+                session_count = len(new_data.get('session', []))
+                print(f"     ✅ Fetched {session_count} sessions")
                 consecutive_errors = 0  # Reset on success
                 
                 # Get previous data for this event
                 prev_data = previous_data.get(event_name)
+                
+                if prev_data is None:
+                    print(f"     ℹ️  First time fetching - establishing baseline")
+                    event_status[event_name] = f"BASELINE ({session_count} sessions)"
                 
                 # Detect changes
                 try:
                     changes = detect_changes(new_data, prev_data, event_name, config)
                     
                     if changes:
-                        print(f"  🔔 {len(changes)} change(s) detected!")
+                        print(f"     🔔 {len(changes)} CHANGE(S) DETECTED!")
                         for change in changes:
-                            print(f"     - {change['type']}: {change['member']}")
+                            print(f"        - {change['type']}: {change['member']} ({change.get('session', '?')})")
                         all_changes.extend(changes)
+                        event_status[event_name] = f"{len(changes)} CHANGES"
                     else:
-                        print(f"  ✓ No changes detected")
+                        if prev_data is not None:
+                            print(f"     ✓ No changes")
+                            event_status[event_name] = "NO CHANGES"
                 except Exception as e:
-                    print(f"  ❌ Error detecting changes: {e}")
+                    print(f"     ❌ Error detecting changes: {e}")
+                    event_status[event_name] = f"ERROR: {e}"
                     import traceback
                     traceback.print_exc()
                 
                 # Update previous data
                 previous_data[event_name] = new_data
+            
+            # Print summary
+            print(f"\n  📊 ITERATION SUMMARY:")
+            for ev, status in event_status.items():
+                print(f"     {ev}: {status}")
             
             # Save updates
             try:
